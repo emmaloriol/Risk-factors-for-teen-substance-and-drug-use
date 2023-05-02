@@ -1,0 +1,231 @@
+---
+title: "Written Homework 1"
+author: "Emma"
+date: "2023-04-04"
+output: 
+  pdf_document: default
+---
+```{r}
+library(dplyr)
+library(tree)
+library(randomForest)
+library(tidyverse)
+library(gbm)
+```
+
+```{r}
+load('youth_data.Rdata') #load youth data set
+#glimpse(df) #preview data
+
+```
+##Binary Classification 
+
+Goal: Classify if a person has ever smoked cigarettes
+
+Data prep and cleaning
+```{r}
+df <- na.omit(df)#remove na values
+
+table(df$ircigage) #5083 people indicate never smoked
+table(df$ircigfm) #5083 people indicate never smoked. Verify this matches ircigage and that both are good variables to measure if someone has ever smoked
+
+df$neversmoked <- df$ircigfm == '91' #intermediate dummy variable
+df$smokehistory <- ifelse(df$neversmoked == TRUE, "No", "Yes") #create dummy variable for smoke history
+
+df = subset(df, select = -c(neversmoked) ) #remove intermediate dummy variable
+#glimpse(df) #preview data
+table(df$smokehistory) #verify counts
+
+cigarettefreq = subset(df, select = -c(ircigage,ircigfm, cigmdays, tobflag) ) #remove predictor variables relating to cigarette smoking history
+#glimpse(cigarettefreq) verify columns dropped
+unique(cigarettefreq$smokehistory) #verify values
+table(cigarettefreq$smokehistory) #verify counts
+
+```
+
+Separate training and test data
+```{r}
+set.seed(1) #set seed for consistent resampling
+sample_size = floor(0.8*nrow(cigarettefreq)) #sample size for training data set
+picked = sample(seq_len(nrow(cigarettefreq)),size = sample_size) #sample 80% of data
+train =cigarettefreq[picked,] #set 80% of data for training
+test =cigarettefreq[-picked,] #set 20% of data for testing
+```
+
+Build  model
+```{r}
+tree.cigarettes <- tree(as.factor(smokehistory) ~ . , cigarettefreq, subset = picked) #tree with training data
+
+```
+
+Review model
+```{r}
+summary(tree.cigarettes)
+plot(tree.cigarettes)
+text(tree.cigarettes, pretty = 0)
+```
+Predictor variables used: [1] "irmjage"     "irsmklsstry" "irmjfy"      "iralcage"    "PRALDLY2"    "PDEN10" <br>
+
+Prune tree
+```{r}
+cv.cig <- cv.tree(tree.cigarettes, FUN = prune.misclass) #prune tree
+cv.cig #print pruned tree information
+prune.cigarettes <- prune.misclass(tree.cigarettes, best = 8) #pruned tree with size 8
+```
+
+Evaluate model
+```{r}
+prune.cigarettes.pred <- predict(prune.cigarettes, test, type = "class")
+table(prune.cigarettes.pred, test$smokehistory)
+(3 + 59)/(780 + 3 + 59 + 12)
+```
+7.3% misclassification error
+
+Try again without substance use columns
+```{r}
+substance_cols #columns related to substance use
+nonsubstance <- subset(df, select = -c(iralcfy, irmjfy, ircigfm, IRSMKLSS30N, iralcfm, irmjfm, ircigage, irsmklsstry, iralcage, irmjage, mrjflag, alcflag, tobflag, alcydays, mrjydays, alcmdays, mrjmdays, cigmdays, smklsmdays)) #data without substance use columns
+nonsubstance #verify columns removed
+```
+Separate training and test data
+```{r}
+set.seed(2) #set seed for consistent resampling
+sample_size = floor(0.8*nrow(nonsubstance)) #sample size for training data set
+picked = sample(seq_len(nrow(nonsubstance)),size = sample_size) #sample 80% of data
+train =nonsubstance[picked,] #set 80% of data for training
+test =nonsubstance[-picked,] #set 20% of data for testing
+```
+
+Build  model
+```{r}
+tree.cigarettes <- tree(as.factor(smokehistory) ~ . , nonsubstance, subset = picked) #tree with training data
+
+```
+
+Review model
+```{r}
+summary(tree.cigarettes)
+plot(tree.cigarettes)
+text(tree.cigarettes, pretty = 0)
+tree.cigarettes
+```
+Variables used: stndsmj, prmjmo, PRMJEVR2, stndalc <br>
+stndsmj - students in yth grade use marijuana <br>
+prmjmo - parents feel about yth use marijuana mnthly <br>
+PRMJEVR2 - parents feel about yth try marijuana <br>
+stndalc - students in yth grade drink alcoholic beverages <br>
+
+Prune tree
+```{r}
+cv.cig <- cv.tree(tree.cigarettes, FUN = prune.misclass) #prune tree
+cv.cig #print pruned tree information
+prune.cigarettes <- prune.misclass(tree.cigarettes, best = 7) #pruned tree with size 7
+summary(prune.cigarettes)
+```
+Variables used: stndsmj, prmjmo, PRMJEVR2, stndalc <br>
+stndsmj - students in yth grade use marijuana <br>
+prmjmo - parents feel about yth use marijuana mnthly <br>
+relgimpt - religious beliefs very important in life
+PRMJEVR2 - Yth think parents feel about yth try marijuana
+avggrade - grade average for last grading period completed
+PRLMTTV2 - parents limit amount of TV in the past year
+
+Evaluate model
+```{r}
+prune.cigarettes.pred <- predict(prune.cigarettes, test, type = "class") #predicted values
+table(prune.cigarettes.pred, test$smokehistory) #table of predictions
+(58)/(796 + 59)
+1- (58)/(796 + 59)
+```
+6.7% misclassification rate, but model always predicts no smoke history. <br>
+
+##Multicategorical classification
+```{r}
+glimpse(df) #preview data
+
+```
+
+```{r}
+set.seed(3) #set seed for consistent resampling
+sample_size = floor(0.8*nrow(df)) #sample size for training data set
+picked = sample(seq_len(nrow(df)),size = sample_size) #sample 80% of data
+train =df[picked,] #set 80% of data for training
+test =df[-picked, "HEALTH2"] #set 20% of data for testing
+
+```
+
+Make tree using random forest
+```{r}
+set.seed(4)
+#glimpse(df) #79 predictors. Sqrt of 79 is 8.8, so round to mtry = 9
+health <- randomForest(as.factor(HEALTH2) ~ ., data = df, subset = picked, mtry = 9, ntree = 500, importance = TRUE) #random forest model plot
+#plot(1:length(health$mse), health$mse) #plot mse and number of trees Why doesn't this work?
+
+```
+
+Evaluate model
+```{r}
+predicted <- predict(health, newdata = df[-picked, ]) #predicted values
+table(predicted, test)
+(125 + 40 + 5 + 159 + 117 + 19 + 9 + 20 + 5) / (130 + 124 + 47 + 5 + 164 + 207 + 106 + 19 + 12 + 17 + 18 + 5) #58% misclassification error
+1 - (125 + 40 + 5 + 159 + 117 + 19 + 9 + 20 + 5) / (130 + 124 + 47 + 5 + 164 + 207 + 106 + 19 + 12 + 17 + 18 + 5)
+importance(health) #importance of variables
+varImpPlot(health)
+```
+Most important variables (in order):
+PRPROUD2: RC-PARENTS TELL YTH PROUD OF THINGS DONE IN PST YR <br>
+YFLTMRJ2: RC-HOW YTH FEELS: PEERS TRY MARIJUANA <br>
+PRGDJOB2: RC-PARENTS TELL YTH HAD DONE GOOD JOB IN PST YR <br>
+talkprob: RC-WHO YTH TALKS WITH ABOUT SERIOUS PROBLEMS <br>
+YTHACT2: RC-YTH PARTICIPATED IN YOUTH ACTIVITIES <br>
+PRMJMO: RC-YTH THINK: PARENTS FEEL ABT YTH USE MARIJUANA MNTHLY <br>
+
+##Regression <br>
+```{r}
+glimpse(df)
+```
+Use regression to predict first age of alcohol use with only youth experience columns
+Clean and prep data
+```{r}
+youth_experience_cols
+youthexp <- subset(df, select = c(schfelt, tchgjob, avggrade, stndscig, stndsmj, stndalc, stnddnk, parchkhw, parhlphw, PRCHORE2, PRLMTTV2, parlmtsn, PRGDJOB2, PRPROUD2,
+argupar, YOFIGHT2, YOGRPFT2, YOHGUN2, YOSELL2, YOSTOLE2, YOATTAK2, PRPKCIG2, PRMJEVR2, prmjmo, PRALDLY2, YFLPKCG2, YFLTMRJ2, yflmjmo, YFLADLY2, FRDPCIG2, FRDMEVR2, frdmjmon, FRDADLY2, talkprob, PRTALK3, PRBSOLV2, PREVIOL2, PRVDRGO2, GRPCNSL2, PREGPGM2, YTHACT2, DRPRVME3, ANYEDUC3, rlgattd, rlgimpt, rlgdcsn, rlgfrnd, iralcage))
+youthexp$iralcage
+
+youthexp <- youthexp %>% #remove respondents who haven't tried alcohol
+  filter(iralcage != 991)
+table(youthexp$iralcage)
+```
+
+Split training and testing data
+```{r}
+set.seed(7) #set seed for consistent resampling
+sample_size = floor(0.8*nrow(youthexp)) #sample size for training data set
+picked = sample(seq_len(nrow(youthexp)),size = sample_size) #sample 80% of data
+train =youthexp[picked,] #set 80% of data for training
+test =youthexp[-picked, ] #set 20% of data for testing
+```
+
+Build boosting model
+```{r}
+set.seed(15)
+boost <- gbm(iralcage ~ ., data = train, distribution = "gaussian", n.trees = 1000, interaction.depth = 4, shrinkage = 0.01, verbose = F) #boosted model
+summary(boost) #summary of model
+```
+Most important variables: <br>
+stndalc: RC-STUDENTS IN YTH GRADE DRINK ALCOHOLIC BEVERAGES
+PRTALK3: RC-TALKED WITH PARENT ABOUT DANGER TOB/ALC/DRG
+YFLTMRJ2:  RC-HOW YTH FEELS: PEERS TRY MARIJUANA
+YOFIGHT2: RC-YOUTH HAD SERIOUS FIGHT AT SCHOOL/WORK
+YOHGUN2: RC- YOUTH CARRIED A HANDGUN
+
+Evaluate model
+```{r}
+yhat.boost <- predict(boost, newdata = youthexp[-picked, ], n.trees = 5000)
+mean((yhat.boost - test$iralcage)^2)
+plot(yhat.boost)
+
+summary(yhat.boost)
+glimpse(df)
+```
+MSE is 4.32, meaning that on average the model predicted the first age of alcohol use within 4.32 years of the actual first age of alcohol use. 
